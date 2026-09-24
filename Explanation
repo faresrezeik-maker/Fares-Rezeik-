@@ -1,1 +1,68 @@
+Prompt Engineering in Python — Coding Exercises
+Name: Fares Rezeik · Email: fares.rezeik@sjsu.edu · Date: 2026-09-23
+
+This write-up explains what each exercise does, the tools and prompts used, and the results. Each exercise is a separate Google Colab notebook (.ipynb) with the prompts, code, and successful output visible in the cells.
+
+GitHub repository: https://github.com/faresrezeik-maker/Fares-Rezeik-
+
+#	Exercise	Notebook link
+1	Prompt Chaining for a Customer Support AI	https://github.com/faresrezeik-maker/Fares-Rezeik-/blob/main/1_customer_support_prompt_chaining.ipynb
+2	Code Generation with ReACT Prompting	https://github.com/faresrezeik-maker/Fares-Rezeik-/blob/main/2_react_code_generation.ipynb
+3	Self-Reflection Prompt for Improving Output	https://github.com/faresrezeik-maker/Fares-Rezeik-/blob/main/3_self_reflection_summary.ipynb
+Common tools: Google Colab (Python 3), OpenAI API (gpt-4o-mini) as the LLM, and the Python standard library. Each notebook calls the real API when an OPENAI_API_KEY is set, and otherwise uses a clearly-labeled deterministic fallback so the output is always reproducible and visible.
+
+Exercise 1 — Prompt Chaining for a Customer Support AI
+What it does: Simulates a customer-support flow as a chain of 4 prompts, where the output of one step becomes the input to the next.
+
+Tool: Colab + OpenAI API (gpt-4o-mini); steps pass structured data as JSON.
+The chain: Ticket → ① Classify (category, urgency, sentiment) → ② Gather missing info (asks only for what that category needs) → ③ Propose solution (diagnosis + customer reply) → ④ Escalation decision (escalate yes/no, priority).
+Why it's a real chain: Step 2 reads Step 1's category; Step 3 uses Steps 1 + 2; Step 4 uses Steps 1 + 3. Each prompt has a role, tone, required fields, and guardrails (e.g., never ask for full card numbers).
+Prompts (by step):
+
+Step 1 — Classify
+System: "You are a Tier-1 customer-support triage assistant for an e-commerce store. Classify tickets objectively. Do NOT invent facts not present in the ticket."
+User: "Classify the customer ticket below. Return ONLY valid JSON with keys: category, subcategory, urgency (Low|Medium|High), sentiment. TICKET: {ticket}"
+Step 2 — Gather missing info (uses Step 1)
+System: "You are a support agent writing to the customer. Tone: warm, concise, professional. Ask ONLY for information needed to resolve THIS category. Never ask for full card numbers, passwords, or security codes."
+User: "Decide what info is still missing, then write a short message requesting exactly that. Return ONLY JSON: missing_info (list), customer_message (<= 60 words). CLASSIFICATION: {step1} ORIGINAL TICKET: {ticket}"
+Step 3 — Propose solution (uses Steps 1 + 2)
+System: "You are a resolution specialist. Propose the smallest correct fix. Do not promise anything outside standard policy (refunds to original payment method, 5-10 business days)."
+User: "Produce a resolution. Return ONLY JSON: diagnosis, steps (list), customer_message (<= 70 words, empathetic, no jargon). CLASSIFICATION: {step1} INFO GATHERED: {step2} ORIGINAL TICKET: {ticket}"
+Step 4 — Escalation decision (uses Steps 1 + 3)
+System: "You are a support supervisor. Escalate only for fraud, chargebacks, legal/threats, or amounts a Tier-1 agent cannot refund. Be conservative."
+User: "Decide whether this resolved case needs escalation. Return ONLY JSON: escalate (true|false), reason, route_to, priority (P1|P2|P3). CLASSIFICATION: {step1} PROPOSED RESOLUTION: {step3}"
+Iteration shown (before → after): a vague v1 prompt ("You are a helpful assistant. Look at this ticket and tell me about it.") produces free-form prose the next step can't parse. The constrained v2 (role + explicit JSON schema + urgency enum + "don't invent facts" guardrail) produces machine-readable output the chain can use.
+
+Exercise 2 — Code Generation with ReACT Prompting
+What it does: Uses the ReACT pattern (Reason → Act → Observe → Fix) to generate Python code, actually run it, and correct it based on what running it reveals.
+
+Tool: Colab + OpenAI API for code generation; Python exec() runs the generated code for real (the Observe step is genuine, not simulated).
+Task specification (constraints given to the model): write primes_up_to(n) returning a sorted list[int] of primes ≤ n; standard library only; n < 2 must return [] (no crash). Acceptance test: primes_up_to(10) == [2, 3, 5, 7] and primes_up_to(1) == [].
+ReACT prompt (stages):
+
+System: "You are a senior Python engineer using the ReACT method. Think step by step (Thought), then output ONE Python code block (Action). When told an observation (a test failure/error), reason about the cause, then output corrected code. Standard library only."
+User (Thought/Action): "Thought: we need primes_up_to(n)… Action: write the function."
+User (feedback turn): "Observation: the acceptance test FAILED -> AssertionError: primes_up_to(10) -> [1, 2, 3, 5, 7], expected [2, 3, 5, 7]. Thought: reason about why, then Action: return corrected code."
+The loop and evidence:
+
+Round 1 generated buggy code; running the acceptance test FAILED because range(1, n) both included 1 (not prime) and excluded n.
+Round 2 fixed it: start candidates at 2, use range(2, n + 1), add the n < 2 guard, and trial-divide only up to sqrt(num). The test then PASSED.
+Final output: primes up to 50 = [2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47]; count 15; sum 328; primes_up_to(0) == [], primes_up_to(1) == [].
+Exercise 3 — Self-Reflection Prompt for Improving Output
+What it does: The model writes a summary, critiques its own work against explicit criteria, then revises it (critique-and-revise / self-reflection).
+
+Tool: Colab + OpenAI API (gpt-4o-mini).
+Requirements used for the critique (specific and measurable): accuracy (no invented facts), audience (general high-school reader), length (≤ 40 words), format (exactly 2 bullet points), focus (the main mechanism: inputs → outputs).
+Prompts:
+
+Original (v1): System: "You are a science writer. Summarize clearly for a general audience." User: "Summarize the following text: {source about photosynthesis}"
+Self-critique: System: "You are a strict editor. Critique a summary ONLY against the given requirements. Say PASS/FAIL/PARTIAL per criterion. Do not rewrite yet." User: "Requirements: 1 ACCURACY… 2 AUDIENCE high-school… 3 LENGTH <=40 words… 4 FORMAT exactly 2 bullets… 5 FOCUS main mechanism. Return ONLY JSON: accuracy, audience, length, format, focus, verdict. SOURCE: {…} SUMMARY: {v1}"
+Revision: System: "You are a science writer revising your own draft. Apply the editor's critique exactly. Obey every requirement: <=40 words, exactly 2 bullet points, high-school audience, lead with the core mechanism. Output ONLY the revised summary."
+Improvement shown (before → after):
+
+Before (v1): 69 words, one run-on sentence, 0 bullets, filler ("very important and complex", "good for humans").
+After (v2): 27 words, exactly 2 bullets, leads with the core mechanism:
+Plants use sunlight in their chloroplasts to turn water and carbon dioxide into sugar.
+The process releases oxygen, which animals and people need to breathe.
+The critique flagged LENGTH = FAIL and FORMAT = FAIL; the revision fixed both — clear evidence of the critique-and-revise loop.
 
